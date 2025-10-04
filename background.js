@@ -4,7 +4,9 @@ let recordingState = {
   startTime: null,
   mediaRecorder: null,
   recordedChunks: [],
-  streamId: null
+  streamId: null,
+  pulseInterval: null,
+  maxDurationTimeout: null
 };
 
 // Message handler
@@ -30,14 +32,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'stopRecording':
       if (!isFromPopup) return;
       stopRecording()
-        .then(() => sendResponse({ success: true }))
+        .then(result => {
+          if (result && result.success === false) {
+            sendResponse(result);
+          } else {
+            sendResponse({ success: true });
+          }
+        })
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true; // Async response
 
     case 'cancelRecording':
       if (!isFromPopup) return;
       cancelRecording()
-        .then(() => sendResponse({ success: true }))
+        .then(result => {
+          if (result && result.success === false) {
+            sendResponse(result);
+          } else {
+            sendResponse({ success: true });
+          }
+        })
         .catch(error => sendResponse({ success: false, error: error.message }));
       return true; // Async response
   }
@@ -55,19 +69,41 @@ async function startRecording(audioOptions) {
     // Get settings from storage
     const settings = await chrome.storage.sync.get({
       videoQuality: '1080p',
-      frameRate: 30
+      frameRate: 30,
+      recordingSource: 'current-tab', // default to current tab
+      maxDuration: 0 // 0 means unlimited
     });
     console.log('Settings:', settings);
 
     // Determine video constraints based on quality
     const videoConstraints = getVideoConstraints(settings.videoQuality, settings.frameRate);
 
-    // Request tab capture with audio
-    const streamId = await chrome.tabCapture.getMediaStreamId({
-      targetTabId: tab.id
-    });
-    console.log('Stream ID:', streamId);
+    let streamId;
 
+    if (settings.recordingSource === 'picker') {
+      // Show Chrome's native picker for screen, window, or tab selection
+      streamId = await new Promise((resolve, reject) => {
+        chrome.desktopCapture.chooseDesktopMedia(
+          ['screen', 'window', 'tab', 'audio'],
+          tab,
+          (id) => {
+            if (id) {
+              resolve(id);
+            } else {
+              reject(new Error('User cancelled source selection'));
+            }
+          }
+        );
+      });
+    } else {
+      // Use current tab (backward compatibility)
+      const tabStreamId = await chrome.tabCapture.getMediaStreamId({
+        targetTabId: tab.id
+      });
+      streamId = tabStreamId;
+    }
+
+    console.log('Stream ID:', streamId);
     recordingState.streamId = streamId;
 
     // This will be handled in the offscreen document
@@ -79,18 +115,50 @@ async function startRecording(audioOptions) {
       action: 'offscreen:initRecording',
       streamId: streamId,
       audioOptions: audioOptions,
-      videoConstraints: videoConstraints
+      videoConstraints: videoConstraints,
+      isDesktopCapture: settings.recordingSource === 'picker'
     });
     console.log('Init recording response:', offscreenResponse);
 
+    // Check if offscreen recording actually started successfully
+    if (!offscreenResponse.success) {
+      throw new Error(offscreenResponse.error || 'Failed to initialize recording');
+    }
+
     recordingState.isRecording = true;
     recordingState.startTime = Date.now();
+
+    // Start pulsing icon animation
+    startPulsingIcon();
+
+    // Set max duration timeout if specified
+    if (settings.maxDuration > 0) {
+      recordingState.maxDurationTimeout = setTimeout(async () => {
+        console.log('Max recording duration reached, auto-stopping...');
+        try {
+          await stopRecording();
+        } catch (error) {
+          console.error('Failed to auto-stop recording:', error);
+        }
+      }, settings.maxDuration * 60000); // Convert minutes to milliseconds
+    }
 
     // Notify popup of state change
     notifyStateChange();
 
   } catch (error) {
     console.error('Failed to start recording:', error);
+    // Reset recording state on error
+    recordingState.isRecording = false;
+    recordingState.startTime = null;
+    recordingState.streamId = null;
+
+    // Stop any pulsing animation
+    stopPulsingIcon();
+
+    // Clear any timeout that might have been set
+    clearMaxDurationTimeout();
+
     throw error;
   }
 }
@@ -98,6 +166,12 @@ async function startRecording(audioOptions) {
 // Stop recording and download
 async function stopRecording() {
   try {
+    // Don't try to stop if not recording
+    if (!recordingState.isRecording) {
+      console.log('No recording to stop');
+      return { success: false, error: 'No active recording' };
+    }
+
     console.log('Stopping recording...');
 
     // Send message to offscreen document to stop recording
@@ -117,6 +191,12 @@ async function stopRecording() {
     recordingState.isRecording = false;
     recordingState.startTime = null;
 
+    // Stop pulsing icon animation
+    stopPulsingIcon();
+
+    // Clear max duration timeout
+    clearMaxDurationTimeout();
+
     notifyStateChange();
 
   } catch (error) {
@@ -128,12 +208,24 @@ async function stopRecording() {
 // Cancel recording without saving
 async function cancelRecording() {
   try {
+    // Don't try to cancel if not recording
+    if (!recordingState.isRecording) {
+      console.log('No recording to cancel');
+      return { success: false, error: 'No active recording' };
+    }
+
     await sendToOffscreen({
       action: 'offscreen:cancelRecording'
     });
 
     recordingState.isRecording = false;
     recordingState.startTime = null;
+
+    // Stop pulsing icon animation
+    stopPulsingIcon();
+
+    // Clear max duration timeout
+    clearMaxDurationTimeout();
 
     notifyStateChange();
 
@@ -222,4 +314,39 @@ function notifyStateChange() {
   }).catch(() => {
     // Popup might be closed, ignore error
   });
+}
+
+// Start pulsing icon animation
+function startPulsingIcon() {
+  // Set initial badge
+  chrome.action.setBadgeText({ text: 'REC' });
+  chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+
+  // Create pulsing effect by alternating badge visibility
+  let visible = true;
+  recordingState.pulseInterval = setInterval(() => {
+    if (visible) {
+      chrome.action.setBadgeText({ text: '' });
+    } else {
+      chrome.action.setBadgeText({ text: 'REC' });
+    }
+    visible = !visible;
+  }, 500);
+}
+
+// Stop pulsing icon animation
+function stopPulsingIcon() {
+  if (recordingState.pulseInterval) {
+    clearInterval(recordingState.pulseInterval);
+    recordingState.pulseInterval = null;
+  }
+  chrome.action.setBadgeText({ text: '' });
+}
+
+// Clear max duration timeout
+function clearMaxDurationTimeout() {
+  if (recordingState.maxDurationTimeout) {
+    clearTimeout(recordingState.maxDurationTimeout);
+    recordingState.maxDurationTimeout = null;
+  }
 }

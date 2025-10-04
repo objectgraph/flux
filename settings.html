@@ -171,6 +171,34 @@
     </div>
 
     <div class="section">
+      <h2>Recording Source</h2>
+      <div class="setting-group">
+        <label class="setting-label">Default Recording Source</label>
+        <p class="setting-description">Choose what to record by default</p>
+        <select id="recordingSource">
+          <option value="current-tab">Current Tab Only</option>
+          <option value="picker">Show Picker (Choose Tab/Window/Screen)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Recording Duration</h2>
+      <div class="setting-group">
+        <label class="setting-label">Maximum Recording Duration</label>
+        <p class="setting-description">Automatically stop recording after this duration to prevent forgetting</p>
+        <select id="maxDuration">
+          <option value="0">Unlimited</option>
+          <option value="5">5 minutes</option>
+          <option value="10">10 minutes</option>
+          <option value="30">30 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="120">2 hours</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
       <h2>Audio Defaults</h2>
       <div class="setting-group">
         <label class="setting-label">Default Audio Settings</label>
@@ -183,6 +211,20 @@
           <label class="radio-label">
             <input type="checkbox" id="defaultMicrophone">
             <span>Microphone</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Webcam Overlay (Coming Soon)</h2>
+      <div class="setting-group">
+        <label class="setting-label">Enable Webcam Overlay</label>
+        <p class="setting-description">Show webcam feed as picture-in-picture for annotations</p>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="checkbox" id="enableWebcam" disabled>
+            <span>Enable Webcam (Coming Soon)</span>
           </label>
         </div>
       </div>

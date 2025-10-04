@@ -5,7 +5,9 @@
   "description": "Lightweight screen recording extension for Chrome",
   "permissions": [
     "activeTab",
+    "tabs",
     "tabCapture",
+    "desktopCapture",
     "storage",
     "downloads",
     "offscreen"

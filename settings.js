@@ -1,6 +1,8 @@
 // DOM Elements
 const videoQualitySelect = document.getElementById('videoQuality');
 const frameRateRadios = document.getElementsByName('frameRate');
+const recordingSourceSelect = document.getElementById('recordingSource');
+const maxDurationSelect = document.getElementById('maxDuration');
 const defaultSystemAudioCheckbox = document.getElementById('defaultSystemAudio');
 const defaultMicrophoneCheckbox = document.getElementById('defaultMicrophone');
 const saveBtn = document.getElementById('saveBtn');
@@ -11,6 +13,8 @@ async function loadSettings() {
   const settings = await chrome.storage.sync.get({
     videoQuality: '1080p',
     frameRate: 30,
+    recordingSource: 'current-tab',
+    maxDuration: 0,
     defaultSystemAudio: true,
     defaultMicrophone: false
   });
@@ -25,6 +29,12 @@ async function loadSettings() {
     }
   });
 
+  // Set recording source
+  recordingSourceSelect.value = settings.recordingSource;
+
+  // Set max duration
+  maxDurationSelect.value = settings.maxDuration;
+
   // Set default audio settings
   defaultSystemAudioCheckbox.checked = settings.defaultSystemAudio;
   defaultMicrophoneCheckbox.checked = settings.defaultMicrophone;
@@ -37,6 +47,8 @@ async function saveSettings() {
   const settings = {
     videoQuality: videoQualitySelect.value,
     frameRate: parseInt(selectedFrameRate.value),
+    recordingSource: recordingSourceSelect.value,
+    maxDuration: parseInt(maxDurationSelect.value),
     defaultSystemAudio: defaultSystemAudioCheckbox.checked,
     defaultMicrophone: defaultMicrophoneCheckbox.checked
   };
