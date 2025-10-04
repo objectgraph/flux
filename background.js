@@ -2,17 +2,14 @@
 let recordingState = {
   isRecording: false,
   startTime: null,
-  mediaRecorder: null,
-  recordedChunks: [],
-  streamId: null,
-  pulseInterval: null,
-  maxDurationTimeout: null
+  pulseInterval: null
 };
 
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Only handle messages from popup, not from background script itself
   const isFromPopup = sender.url && sender.url.includes('popup.html');
+  const isFromOffscreen = sender.url && sender.url.includes('offscreen.html');
 
   switch (request.action) {
     case 'getState':
@@ -22,11 +19,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       break;
 
+    case 'autoStopRecording':
+      if (!isFromOffscreen) return;
+      // User stopped sharing - download and cleanup
+      console.log('Auto-stop recording triggered by user');
+      downloadRecording(request.blobUrl)
+        .then(() => {
+          recordingState.isRecording = false;
+          recordingState.startTime = null;
+          stopPulsingIcon();
+          notifyStateChange();
+          sendResponse({ success: true });
+        })
+        .catch(error => {
+          console.error('Failed to download recording:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
     case 'startRecording':
       if (!isFromPopup) return;
-      startRecording(request.audioOptions)
-        .then(() => sendResponse({ success: true }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+      startRecordingWithPicker(request.audioOptions)
+        .then(result => {
+          console.log('startRecording completed with result:', result);
+          sendResponse(result);
+        })
+        .catch(error => {
+          console.error('startRecording failed with error:', error);
+          sendResponse({ success: false, error: error.message });
+        });
       return true; // Async response
 
     case 'stopRecording':
@@ -57,107 +78,75 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Start recording function
-async function startRecording(audioOptions) {
+// Start recording with picker or current tab
+async function startRecordingWithPicker(audioOptions) {
   try {
     console.log('Starting recording with options:', audioOptions);
 
-    // Get active tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    console.log('Active tab:', tab.id);
-
-    // Get settings from storage
-    const settings = await chrome.storage.sync.get({
-      videoQuality: '1080p',
-      frameRate: 30,
-      recordingSource: 'current-tab', // default to current tab
-      maxDuration: 0 // 0 means unlimited
-    });
-    console.log('Settings:', settings);
-
-    // Determine video constraints based on quality
-    const videoConstraints = getVideoConstraints(settings.videoQuality, settings.frameRate);
-
-    let streamId;
-
-    if (settings.recordingSource === 'picker') {
-      // Show Chrome's native picker for screen, window, or tab selection
-      streamId = await new Promise((resolve, reject) => {
-        chrome.desktopCapture.chooseDesktopMedia(
-          ['screen', 'window', 'tab', 'audio'],
-          tab,
-          (id) => {
-            if (id) {
-              resolve(id);
-            } else {
-              reject(new Error('User cancelled source selection'));
-            }
-          }
-        );
-      });
-    } else {
-      // Use current tab (backward compatibility)
-      const tabStreamId = await chrome.tabCapture.getMediaStreamId({
-        targetTabId: tab.id
-      });
-      streamId = tabStreamId;
-    }
-
-    console.log('Stream ID:', streamId);
-    recordingState.streamId = streamId;
-
-    // This will be handled in the offscreen document
+    // Always use picker mode - let user choose what to record
     await setupOffscreenDocument();
     console.log('Offscreen document ready');
 
-    // Send message to offscreen document to start recording
-    const offscreenResponse = await sendToOffscreen({
-      action: 'offscreen:initRecording',
-      streamId: streamId,
-      audioOptions: audioOptions,
-      videoConstraints: videoConstraints,
-      isDesktopCapture: settings.recordingSource === 'picker'
-    });
-    console.log('Init recording response:', offscreenResponse);
+    // Use default high quality settings
+    const videoConstraints = {
+      width: 1920,
+      height: 1080,
+      frameRate: 30
+    };
 
-    // Check if offscreen recording actually started successfully
+    // Send message to offscreen to show picker and start recording
+    const offscreenResponse = await sendToOffscreen({
+      action: 'offscreen:startPickerRecording',
+      audioOptions: audioOptions,
+      videoConstraints: videoConstraints
+    });
+    console.log('Picker recording response:', offscreenResponse);
+
     if (!offscreenResponse.success) {
-      throw new Error(offscreenResponse.error || 'Failed to initialize recording');
+      const errorMsg = offscreenResponse.error || 'Failed to start recording';
+      await showNotification('Recording Failed', errorMsg, 'error');
+      throw new Error(errorMsg);
     }
 
     recordingState.isRecording = true;
     recordingState.startTime = Date.now();
-
-    // Start pulsing icon animation
     startPulsingIcon();
 
-    // Set max duration timeout if specified
-    if (settings.maxDuration > 0) {
-      recordingState.maxDurationTimeout = setTimeout(async () => {
-        console.log('Max recording duration reached, auto-stopping...');
-        try {
-          await stopRecording();
-        } catch (error) {
-          console.error('Failed to auto-stop recording:', error);
-        }
-      }, settings.maxDuration * 60000); // Convert minutes to milliseconds
+    notifyStateChange();
+
+    // Show success notification
+    if (offscreenResponse.warning) {
+      await showNotification('Recording Started', offscreenResponse.warning, 'warning');
+    } else {
+      await showNotification('Recording Started', 'Your screen is now being recorded', 'basic');
     }
 
-    // Notify popup of state change
-    notifyStateChange();
+    return {
+      success: true,
+      warning: offscreenResponse.warning
+    };
 
   } catch (error) {
     console.error('Failed to start recording:', error);
     // Reset recording state on error
     recordingState.isRecording = false;
     recordingState.startTime = null;
-    recordingState.streamId = null;
 
     // Stop any pulsing animation
     stopPulsingIcon();
 
-    // Clear any timeout that might have been set
-    clearMaxDurationTimeout();
+    // Show notification for errors when popup is likely closed
+    // Get settings to check if picker mode
+    const settings = await chrome.storage.sync.get({
+      recordingSource: 'current-tab'
+    });
+
+    if (settings.recordingSource === 'picker') {
+      // Don't show notification for user cancellation
+      if (!error.message.includes('User cancelled')) {
+        await showNotification('Recording Failed', error.message, 'error');
+      }
+    }
 
     throw error;
   }
@@ -194,9 +183,6 @@ async function stopRecording() {
     // Stop pulsing icon animation
     stopPulsingIcon();
 
-    // Clear max duration timeout
-    clearMaxDurationTimeout();
-
     notifyStateChange();
 
   } catch (error) {
@@ -224,9 +210,6 @@ async function cancelRecording() {
     // Stop pulsing icon animation
     stopPulsingIcon();
 
-    // Clear max duration timeout
-    clearMaxDurationTimeout();
-
     notifyStateChange();
 
   } catch (error) {
@@ -247,18 +230,7 @@ async function downloadRecording(blobUrl) {
   });
 }
 
-// Get video constraints based on quality settings
-function getVideoConstraints(quality, frameRate) {
-  const constraints = {
-    '720p': { width: 1280, height: 720 },
-    '1080p': { width: 1920, height: 1080 }
-  };
-
-  return {
-    ...constraints[quality],
-    frameRate: frameRate
-  };
-}
+// Removed getVideoConstraints - now using fixed high quality settings
 
 // Setup offscreen document for recording
 async function setupOffscreenDocument() {
@@ -316,6 +288,19 @@ function notifyStateChange() {
   });
 }
 
+// Show notification (for picker mode where popup is closed)
+async function showNotification(title, message, type = 'basic') {
+  const iconPath = type === 'error' ? 'icons/icon48.png' : 'icons/icon48.png';
+
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: iconPath,
+    title: title,
+    message: message,
+    priority: type === 'error' ? 2 : 1
+  });
+}
+
 // Start pulsing icon animation
 function startPulsingIcon() {
   // Set initial badge
@@ -343,10 +328,4 @@ function stopPulsingIcon() {
   chrome.action.setBadgeText({ text: '' });
 }
 
-// Clear max duration timeout
-function clearMaxDurationTimeout() {
-  if (recordingState.maxDurationTimeout) {
-    clearTimeout(recordingState.maxDurationTimeout);
-    recordingState.maxDurationTimeout = null;
-  }
-}
+// Removed clearMaxDurationTimeout - no longer using max duration timeouts

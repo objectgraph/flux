@@ -70,6 +70,43 @@ function hideError() {
   permissionBtn.style.display = 'none';
 }
 
+// Show warning message (less severe than error)
+function showWarning(message) {
+  console.log('Showing warning:', message);
+
+  // Create warning element if it doesn't exist
+  let warningMessage = document.getElementById('warningMessage');
+  if (!warningMessage) {
+    warningMessage = document.createElement('div');
+    warningMessage.id = 'warningMessage';
+    warningMessage.className = 'warning-message';
+    warningMessage.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      <span id="warningText"></span>
+    `;
+    document.querySelector('.popup-container').insertBefore(warningMessage, recordingControls);
+  }
+
+  const warningText = document.getElementById('warningText');
+  warningText.textContent = message;
+  warningMessage.style.display = 'flex';
+
+  // Auto-hide after 5 seconds
+  setTimeout(() => {
+    hideWarning();
+  }, 5000);
+}
+
+// Hide warning message
+function hideWarning() {
+  const warningMessage = document.getElementById('warningMessage');
+  if (warningMessage) {
+    warningMessage.style.display = 'none';
+  }
+}
+
 // Open Chrome microphone settings
 function openMicrophoneSettings() {
   // Get the current tab URL to show site-specific settings
@@ -160,7 +197,7 @@ async function init() {
   const state = await chrome.runtime.sendMessage({ action: 'getState' });
   updateUI(state);
 
-  // Load default audio settings if not recording
+  // Load default audio settings from storage if not recording
   if (!state.isRecording) {
     const settings = await chrome.storage.sync.get({
       defaultSystemAudio: true,
@@ -170,8 +207,9 @@ async function init() {
     microphoneAudioCheckbox.checked = settings.defaultMicrophone;
   }
 
-  // Clear any lingering errors on popup open
+  // Clear any lingering errors and warnings on popup open
   hideError();
+  hideWarning();
 }
 
 // Update UI based on recording state
@@ -212,37 +250,27 @@ startBtn.addEventListener('click', async () => {
   // Hide any existing errors
   hideError();
 
-  // Show countdown
-  mainControls.style.display = 'none';
-  countdown.style.display = 'block';
-
-  for (let i = 3; i > 0; i--) {
-    countdownNumber.textContent = i;
-    countdownNumber.style.animation = 'none';
-    setTimeout(() => {
-      countdownNumber.style.animation = 'countdownPulse 1s ease-in-out';
-    }, 10);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-
-  countdown.style.display = 'none';
-
-  // Start recording
   try {
+    // Call startRecording - it will handle picker vs current tab
     const response = await chrome.runtime.sendMessage({
       action: 'startRecording',
       audioOptions
     });
 
-    if (response && response.success) {
-      recordingStartTime = Date.now();
-      updateUI({ isRecording: true, startTime: recordingStartTime });
-    } else {
-      // Show error and restore UI
+    if (!response || !response.success) {
       const errorMsg = response?.error || 'Failed to start recording';
       console.log('Recording failed:', errorMsg);
       showError(errorMsg);
-      updateUI({ isRecording: false });
+      return;
+    }
+
+    // Recording started successfully (no countdown for any mode)
+    recordingStartTime = Date.now();
+    updateUI({ isRecording: true, startTime: recordingStartTime });
+
+    // Show warning if present
+    if (response.warning) {
+      showWarning(response.warning);
     }
   } catch (error) {
     console.error('Error starting recording:', error);

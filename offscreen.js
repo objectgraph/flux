@@ -1,6 +1,7 @@
 let mediaRecorder = null;
 let recordedChunks = [];
 let stream = null;
+let recordingWarning = null;
 
 console.log('Offscreen document loaded');
 
@@ -9,11 +10,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Offscreen received message:', request.action, 'from:', sender.url);
 
   switch (request.action) {
+    case 'offscreen:startPickerRecording':
+      startPickerRecording(request.audioOptions, request.videoConstraints)
+        .then(() => {
+          console.log('Picker recording started successfully');
+          const response = { success: true };
+          if (recordingWarning) {
+            response.warning = recordingWarning;
+          }
+          sendResponse(response);
+        })
+        .catch(error => {
+          console.error('Picker recording failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
     case 'offscreen:initRecording':
       initRecording(request.streamId, request.audioOptions, request.videoConstraints, request.isDesktopCapture)
         .then(() => {
           console.log('Recording initialized successfully');
-          sendResponse({ success: true });
+          const response = { success: true };
+          if (recordingWarning) {
+            response.warning = recordingWarning;
+          }
+          sendResponse(response);
         })
         .catch(error => {
           console.error('Recording init failed:', error);
@@ -47,99 +68,276 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Initialize recording
-async function initRecording(streamId, audioOptions, videoConstraints, isDesktopCapture) {
+// Start recording with getDisplayMedia picker (no streamId needed!)
+async function startPickerRecording(audioOptions, videoConstraints) {
   try {
-    console.log('Init recording with streamId:', streamId, 'audioOptions:', audioOptions, 'videoConstraints:', videoConstraints, 'isDesktopCapture:', isDesktopCapture);
+    console.log('Starting picker recording with options:', audioOptions, videoConstraints);
 
     // Clean up any existing recording
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      console.log('Cleaning up existing recorder with state:', mediaRecorder.state);
       mediaRecorder.stop();
-      mediaRecorder = null;
     }
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    recordedChunks = [];
+    recordingWarning = null;
+
+    // Use getDisplayMedia to show picker and get stream directly
+    // This works in offscreen documents!
+    const displayConstraints = {
+      video: {
+        width: { ideal: videoConstraints.width },
+        height: { ideal: videoConstraints.height },
+        frameRate: { ideal: videoConstraints.frameRate }
+      },
+      audio: audioOptions.systemAudio
+    };
+
+    console.log('Calling getDisplayMedia with constraints:', displayConstraints);
+    stream = await navigator.mediaDevices.getDisplayMedia(displayConstraints);
+    console.log('Got display media stream with', stream.getTracks().length, 'tracks');
+
+    // Listen for when user stops sharing (clicks "Stop sharing" button)
+    stream.getVideoTracks()[0].addEventListener('ended', () => {
+      console.log('User stopped sharing - auto-stopping recording');
+      stopRecording()
+        .then(blobUrl => {
+          // Notify background to download
+          chrome.runtime.sendMessage({
+            action: 'autoStopRecording',
+            blobUrl: blobUrl
+          });
+        })
+        .catch(error => {
+          console.error('Failed to auto-stop recording:', error);
+        });
+    });
+
+    // Check if we got audio
+    if (audioOptions.systemAudio && stream.getAudioTracks().length === 0) {
+      recordingWarning = 'Recording without system audio - not available for this source';
+    }
+
+    // If microphone is requested, mix it with system audio
+    if (audioOptions.microphone) {
+      let micStream;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (micError) {
+        console.error('Failed to get microphone:', micError);
+        let warningMsg = 'Recording without microphone: ';
+        if (micError.name === 'NotAllowedError') {
+          warningMsg += 'Permission denied';
+        } else if (micError.name === 'NotFoundError') {
+          warningMsg += 'No microphone found';
+        } else {
+          warningMsg += micError.message || 'Unknown error';
+        }
+
+        if (!recordingWarning) {
+          recordingWarning = warningMsg;
+        } else {
+          recordingWarning += ' | ' + warningMsg;
+        }
+        micStream = null;
+      }
+
+      // Mix audio if we have microphone
+      if (micStream) {
+        const audioContext = new AudioContext();
+        const destination = audioContext.createMediaStreamDestination();
+
+        // Add system audio if available
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          const systemAudioSource = audioContext.createMediaStreamSource(new MediaStream(audioTracks));
+          systemAudioSource.connect(destination);
+        }
+
+        // Add microphone
+        const micSource = audioContext.createMediaStreamSource(micStream);
+        micSource.connect(destination);
+
+        // Create new stream with video + mixed audio
+        const videoTrack = stream.getVideoTracks()[0];
+        stream = new MediaStream([videoTrack, ...destination.stream.getAudioTracks()]);
+      }
+    }
+
+    // Create and start MediaRecorder
+    const options = {
+      mimeType: 'video/webm;codecs=vp9',
+      videoBitsPerSecond: 8000000
+    };
+
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+      options.mimeType = 'video/webm;codecs=vp8';
+    }
+
+    mediaRecorder = new MediaRecorder(stream, options);
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.onerror = (event) => {
+      console.error('MediaRecorder error:', event.error);
+    };
+
+    mediaRecorder.onstart = () => {
+      console.log('MediaRecorder started');
+    };
+
+    mediaRecorder.start(1000);
+    console.log('MediaRecorder started, state:', mediaRecorder.state);
+
+  } catch (error) {
+    console.error('Failed to start picker recording:', error);
+    // Clean up
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
       stream = null;
     }
+    if (mediaRecorder) {
+      mediaRecorder = null;
+    }
     recordedChunks = [];
 
-    // Get the stream using the streamId
+    // User-friendly error messages
+    if (error.name === 'NotAllowedError') {
+      throw new Error('Screen recording permission denied');
+    } else if (error.name === 'NotFoundError') {
+      throw new Error('No screen source available');
+    } else {
+      throw new Error(error.message || 'Failed to start recording');
+    }
+  }
+}
+
+// Initialize recording
+async function initRecording(streamId, audioOptions, videoConstraints, isDesktopCapture) {
+  try {
+    console.log('Init recording - streamId:', streamId, 'timestamp:', Date.now());
+
+    // CRITICAL: Use streamId IMMEDIATELY before it expires
+    // Clean up AFTER we get the new stream
+    let newStream = null;
+    let audioFailedWarning = null;
+
     if (isDesktopCapture) {
-      // Desktop capture stream
-      const constraints = {
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: streamId,
-            ...videoConstraints
-          }
-        }
-      };
-
-      // Add audio constraints if system audio is requested
-      if (audioOptions.systemAudio) {
-        constraints.audio = {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: streamId
-          }
-        };
-      } else {
-        constraints.audio = false;
-      }
-
-      console.log('Desktop capture constraints:', constraints);
-
+      // For desktop capture, try getUserMedia immediately with desktop source
       try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (error) {
-        console.error('Failed to get desktop stream, trying without audio:', error);
-        // If it fails with audio, try without audio
-        if (audioOptions.systemAudio) {
-          stream = await navigator.mediaDevices.getUserMedia({
+        const constraints = {
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: streamId,
+              ...videoConstraints
+            }
+          },
+          audio: audioOptions.systemAudio ? {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: streamId
+            }
+          } : false
+        };
+
+        console.log('Getting desktop stream immediately:', Date.now());
+        newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('Got desktop stream successfully:', Date.now());
+
+      } catch (desktopError) {
+        console.error('Desktop capture failed:', desktopError.name, desktopError.message);
+
+        // Try tab capture instead
+        try {
+          const constraints = {
             video: {
               mandatory: {
-                chromeMediaSource: 'desktop',
+                chromeMediaSource: 'tab',
                 chromeMediaSourceId: streamId,
                 ...videoConstraints
               }
             },
-            audio: false
-          });
-          console.log('Got video-only stream after audio failure');
-        } else {
-          throw error;
+            audio: audioOptions.systemAudio ? {
+              mandatory: {
+                chromeMediaSource: 'tab',
+                chromeMediaSourceId: streamId
+              }
+            } : false
+          };
+
+          console.log('Trying tab capture:', Date.now());
+          newStream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log('Got tab stream successfully:', Date.now());
+
+        } catch (tabError) {
+          console.error('Tab capture also failed:', tabError.name, tabError.message);
+
+          // Last attempt: try without audio if it was requested
+          if (audioOptions.systemAudio) {
+            try {
+              const constraints = {
+                video: {
+                  mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: streamId,
+                    ...videoConstraints
+                  }
+                },
+                audio: false
+              };
+
+              newStream = await navigator.mediaDevices.getUserMedia(constraints);
+              audioFailedWarning = 'Recording without system audio - audio capture failed';
+            } catch (finalError) {
+              throw new Error('Failed to capture screen - streamId may have expired');
+            }
+          } else {
+            throw new Error('Failed to capture screen - streamId may have expired');
+          }
         }
       }
     } else {
-      // Tab capture stream (backward compatibility)
-      const tabConstraints = {
+      // Current tab mode
+      const constraints = {
         video: {
           mandatory: {
             chromeMediaSource: 'tab',
             chromeMediaSourceId: streamId,
             ...videoConstraints
           }
-        }
-      };
-
-      // Add audio constraints if system audio is requested
-      if (audioOptions.systemAudio) {
-        tabConstraints.audio = {
+        },
+        audio: audioOptions.systemAudio ? {
           mandatory: {
             chromeMediaSource: 'tab',
             chromeMediaSourceId: streamId
           }
-        };
-      } else {
-        tabConstraints.audio = false;
-      }
+        } : false
+      };
 
-      console.log('Tab capture constraints:', tabConstraints);
-      stream = await navigator.mediaDevices.getUserMedia(tabConstraints);
+      console.log('Getting tab stream:', Date.now());
+      newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('Got tab stream:', Date.now());
     }
-    console.log('Got media stream:', stream);
+
+    // NOW clean up old recording (after we got the new stream)
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      console.log('Cleaning up existing recorder');
+      mediaRecorder.stop();
+    }
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    recordedChunks = [];
+    recordingWarning = audioFailedWarning;
+
+    stream = newStream;
+    console.log('Got media stream with', stream.getTracks().length, 'tracks');
 
     // If microphone is requested, mix it with system audio
     if (audioOptions.microphone) {
@@ -150,39 +348,42 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
         });
       } catch (micError) {
         console.error('Failed to get microphone access:', micError);
-        // Stop any tracks we've obtained
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-        // Properly format the error message
-        let errorMsg = 'Microphone access failed: ';
+        let warningMsg = 'Recording without microphone: ';
         if (micError.name === 'NotAllowedError') {
-          errorMsg += 'Permission denied';
+          warningMsg += 'Permission denied';
         } else if (micError.name === 'NotFoundError') {
-          errorMsg += 'No microphone found';
+          warningMsg += 'No microphone found';
         } else {
-          errorMsg += micError.name || micError.message || 'Unknown error';
+          warningMsg += micError.name || micError.message || 'Unknown error';
         }
-        throw new Error(errorMsg);
+
+        if (!recordingWarning) {
+          recordingWarning = warningMsg;
+        } else {
+          recordingWarning += ' | ' + warningMsg;
+        }
+        micStream = null;
       }
 
-      // Create audio context to mix streams
-      const audioContext = new AudioContext();
-      const destination = audioContext.createMediaStreamDestination();
+      // Only mix audio if we have a microphone stream
+      if (micStream) {
+        const audioContext = new AudioContext();
+        const destination = audioContext.createMediaStreamDestination();
 
-      // Add system audio if enabled
-      if (audioOptions.systemAudio) {
-        const systemAudioSource = audioContext.createMediaStreamSource(stream);
-        systemAudioSource.connect(destination);
+        // Add system audio if enabled
+        if (audioOptions.systemAudio && stream.getAudioTracks().length > 0) {
+          const systemAudioSource = audioContext.createMediaStreamSource(stream);
+          systemAudioSource.connect(destination);
+        }
+
+        // Add microphone audio
+        const micSource = audioContext.createMediaStreamSource(micStream);
+        micSource.connect(destination);
+
+        // Replace audio track with mixed audio
+        const videoTrack = stream.getVideoTracks()[0];
+        stream = new MediaStream([videoTrack, ...destination.stream.getAudioTracks()]);
       }
-
-      // Add microphone audio
-      const micSource = audioContext.createMediaStreamSource(micStream);
-      micSource.connect(destination);
-
-      // Replace audio track with mixed audio
-      const videoTrack = stream.getVideoTracks()[0];
-      stream = new MediaStream([videoTrack, ...destination.stream.getAudioTracks()]);
     } else if (!audioOptions.systemAudio) {
       // Remove audio track if system audio is disabled
       stream.getAudioTracks().forEach(track => track.stop());
@@ -235,7 +436,7 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
       mediaRecorder = null;
     }
     recordedChunks = [];
-    throw new Error(`Error starting ${isDesktopCapture ? 'desktop' : 'tab'} capture: ${error.message}`);
+    throw error;
   }
 }
 

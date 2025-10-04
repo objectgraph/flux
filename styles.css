@@ -197,6 +197,23 @@ body {
   margin-top: 2px;
 }
 
+.warning-message {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 15px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  animation: slideIn 0.3s ease-out;
+  color: #856404;
+}
+
+.warning-message svg {
+  flex-shrink: 0;
+}
+
 .error-content {
   flex: 1;
   display: flex;
