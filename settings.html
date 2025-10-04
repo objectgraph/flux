@@ -222,6 +222,55 @@
     </div>
 
     <div class="section">
+      <h2>Recording Quality</h2>
+      <div class="setting-group">
+        <label class="setting-label">Video Format</label>
+        <p class="setting-description">MP4 offers better compatibility, WebM provides better compression</p>
+        <select id="videoFormat">
+          <option value="webm-vp9">WebM (VP9)</option>
+          <option value="webm-vp8">WebM (VP8)</option>
+          <option value="mp4">MP4 (H264)</option>
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-label">Video Quality Preset</label>
+        <p class="setting-description">Balance between file size and video quality</p>
+        <select id="videoBitrate">
+          <option value="low">Low (1-2 Mbps) - Smallest files</option>
+          <option value="medium">Medium (3-5 Mbps) - Balanced</option>
+          <option value="high">High (6-8 Mbps) - Best quality</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div id="customBitrateContainer" style="display: none; margin-top: 10px;">
+          <input type="number" id="customBitrate" placeholder="Enter bitrate in Mbps" min="0.5" max="50" step="0.5" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;">
+        </div>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-label">Audio Bitrate</label>
+        <p class="setting-description">Audio quality setting</p>
+        <select id="audioBitrate">
+          <option value="96">96 kbps - Low quality</option>
+          <option value="128">128 kbps - Standard</option>
+          <option value="192">192 kbps - High quality</option>
+          <option value="256">256 kbps - Very high quality</option>
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-label">Resolution Limit</label>
+        <p class="setting-description">Downscale video to reduce file size (maintains aspect ratio)</p>
+        <select id="resolutionLimit">
+          <option value="original">Original (No limit)</option>
+          <option value="1080p">1080p Maximum</option>
+          <option value="720p">720p Maximum</option>
+          <option value="480p">480p Maximum</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
       <h2>Recording Duration</h2>
       <div class="setting-group">
         <label class="setting-label">Maximum Recording Duration</label>

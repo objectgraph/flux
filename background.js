@@ -87,18 +87,39 @@ async function startRecordingWithPicker(audioOptions) {
     await setupOffscreenDocument();
     console.log('Offscreen document ready');
 
-    // Use default high quality settings
+    // Get quality settings from storage
+    const settings = await chrome.storage.sync.get({
+      videoQuality: '1080p',
+      frameRate: 30,
+      videoFormat: 'webm-vp9',
+      videoBitrate: 'high',
+      customVideoBitrate: 8,
+      audioBitrate: 128,
+      resolutionLimit: 'original'
+    });
+
+    // Set video constraints based on quality settings
     const videoConstraints = {
-      width: 1920,
-      height: 1080,
-      frameRate: 30
+      width: settings.videoQuality === '1080p' ? 1920 : 1280,
+      height: settings.videoQuality === '1080p' ? 1080 : 720,
+      frameRate: settings.frameRate
+    };
+
+    // Prepare quality settings for offscreen
+    const qualitySettings = {
+      videoFormat: settings.videoFormat,
+      videoBitrate: settings.videoBitrate,
+      customVideoBitrate: settings.customVideoBitrate,
+      audioBitrate: settings.audioBitrate,
+      resolutionLimit: settings.resolutionLimit
     };
 
     // Send message to offscreen to show picker and start recording
     const offscreenResponse = await sendToOffscreen({
       action: 'offscreen:startPickerRecording',
       audioOptions: audioOptions,
-      videoConstraints: videoConstraints
+      videoConstraints: videoConstraints,
+      qualitySettings: qualitySettings
     });
     console.log('Picker recording response:', offscreenResponse);
 
@@ -219,9 +240,18 @@ async function cancelRecording() {
 }
 
 // Download recording
-async function downloadRecording(blobUrl) {
+async function downloadRecording(blobUrl, fileExtension = null) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-  const filename = `flux-recording-${timestamp}.webm`;
+
+  // Determine file extension if not provided
+  if (!fileExtension) {
+    const settings = await chrome.storage.sync.get({
+      videoFormat: 'webm-vp9'
+    });
+    fileExtension = settings.videoFormat === 'mp4' ? 'mp4' : 'webm';
+  }
+
+  const filename = `flux-recording-${timestamp}.${fileExtension}`;
 
   await chrome.downloads.download({
     url: blobUrl,

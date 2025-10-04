@@ -12,7 +12,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   switch (request.action) {
     case 'offscreen:startPickerRecording':
-      startPickerRecording(request.audioOptions, request.videoConstraints)
+      startPickerRecording(request.audioOptions, request.videoConstraints, request.qualitySettings)
         .then(() => {
           console.log('Picker recording started successfully');
           const response = { success: true };
@@ -28,7 +28,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'offscreen:initRecording':
-      initRecording(request.streamId, request.audioOptions, request.videoConstraints, request.isDesktopCapture)
+      initRecording(request.streamId, request.audioOptions, request.videoConstraints, request.isDesktopCapture, request.qualitySettings)
         .then(() => {
           console.log('Recording initialized successfully');
           const response = { success: true };
@@ -69,8 +69,93 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// Helper function to get recorder options based on quality settings
+function getRecorderOptions(qualitySettings) {
+  const format = qualitySettings?.videoFormat || 'webm-vp9';
+  const videoBitrate = qualitySettings?.videoBitrate || 'high';
+  const audioBitrate = (qualitySettings?.audioBitrate || 128) * 1000; // Convert to bps
+
+  let videoBitsPerSecond = 8000000; // Default 8 Mbps
+
+  // Calculate video bitrate based on preset
+  if (videoBitrate === 'low') {
+    videoBitsPerSecond = 1500000; // 1.5 Mbps
+  } else if (videoBitrate === 'medium') {
+    videoBitsPerSecond = 4000000; // 4 Mbps
+  } else if (videoBitrate === 'high') {
+    videoBitsPerSecond = 7000000; // 7 Mbps
+  } else if (videoBitrate === 'custom' && qualitySettings?.customVideoBitrate) {
+    videoBitsPerSecond = qualitySettings.customVideoBitrate * 1000000; // Convert Mbps to bps
+  }
+
+  const options = {
+    videoBitsPerSecond,
+    audioBitsPerSecond: audioBitrate
+  };
+
+  // Set MIME type based on format selection
+  if (format === 'mp4') {
+    // Try MP4 with H264
+    if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+      options.mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+    } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+      options.mimeType = 'video/mp4';
+    } else {
+      // Fallback to WebM if MP4 not supported
+      console.warn('MP4 not supported, falling back to WebM VP9');
+      options.mimeType = 'video/webm;codecs=vp9,opus';
+    }
+  } else if (format === 'webm-vp9') {
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+      options.mimeType = 'video/webm;codecs=vp9,opus';
+    } else {
+      options.mimeType = 'video/webm;codecs=vp9';
+    }
+  } else if (format === 'webm-vp8') {
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+      options.mimeType = 'video/webm;codecs=vp8,opus';
+    } else {
+      options.mimeType = 'video/webm;codecs=vp8';
+    }
+  }
+
+  // Fallback chain if primary format not supported
+  if (!options.mimeType || !MediaRecorder.isTypeSupported(options.mimeType)) {
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+      options.mimeType = 'video/webm;codecs=vp9';
+    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+      options.mimeType = 'video/webm;codecs=vp8';
+    } else {
+      options.mimeType = 'video/webm'; // Most basic fallback
+    }
+  }
+
+  console.log('Using MediaRecorder options:', options);
+  return options;
+}
+
+// Helper function to apply resolution limits
+function applyResolutionLimit(constraints, resolutionLimit) {
+  if (!resolutionLimit || resolutionLimit === 'original') {
+    return constraints;
+  }
+
+  const limits = {
+    '1080p': { width: 1920, height: 1080 },
+    '720p': { width: 1280, height: 720 },
+    '480p': { width: 854, height: 480 }
+  };
+
+  if (limits[resolutionLimit]) {
+    constraints.video.width = { ...constraints.video.width, max: limits[resolutionLimit].width };
+    constraints.video.height = { ...constraints.video.height, max: limits[resolutionLimit].height };
+  }
+
+  return constraints;
+}
+
 // Start recording with getDisplayMedia picker (no streamId needed!)
-async function startPickerRecording(audioOptions, videoConstraints) {
+async function startPickerRecording(audioOptions, videoConstraints, qualitySettings) {
   try {
     console.log('Starting picker recording with options:', audioOptions, videoConstraints);
 
@@ -90,7 +175,7 @@ async function startPickerRecording(audioOptions, videoConstraints) {
 
     // Use getDisplayMedia to show picker and get stream directly
     // This works in offscreen documents!
-    const displayConstraints = {
+    let displayConstraints = {
       video: {
         width: { ideal: videoConstraints.width },
         height: { ideal: videoConstraints.height },
@@ -98,6 +183,9 @@ async function startPickerRecording(audioOptions, videoConstraints) {
       },
       audio: audioOptions.systemAudio
     };
+
+    // Apply resolution limit if specified
+    displayConstraints = applyResolutionLimit(displayConstraints, qualitySettings?.resolutionLimit);
 
     console.log('Calling getDisplayMedia with constraints:', displayConstraints);
     stream = await navigator.mediaDevices.getDisplayMedia(displayConstraints);
@@ -181,16 +269,8 @@ async function startPickerRecording(audioOptions, videoConstraints) {
       }
     }
 
-    // Create and start MediaRecorder
-    const options = {
-      mimeType: 'video/webm;codecs=vp9',
-      videoBitsPerSecond: 8000000
-    };
-
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-      options.mimeType = 'video/webm;codecs=vp8';
-    }
-
+    // Create and start MediaRecorder with quality settings
+    const options = getRecorderOptions(qualitySettings);
     mediaRecorder = new MediaRecorder(stream, options);
 
     mediaRecorder.ondataavailable = (event) => {
@@ -238,7 +318,7 @@ async function startPickerRecording(audioOptions, videoConstraints) {
 }
 
 // Initialize recording
-async function initRecording(streamId, audioOptions, videoConstraints, isDesktopCapture) {
+async function initRecording(streamId, audioOptions, videoConstraints, isDesktopCapture, qualitySettings) {
   try {
     console.log('Init recording - streamId:', streamId, 'timestamp:', Date.now());
 
@@ -427,19 +507,9 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
       stream = new MediaStream([videoTrack]);
     }
 
-    // Create MediaRecorder
+    // Create MediaRecorder with quality settings
     recordedChunks = [];
-
-    const options = {
-      mimeType: 'video/webm;codecs=vp9',
-      videoBitsPerSecond: 8000000 // 8 Mbps for high quality
-    };
-
-    // Fallback to vp8 if vp9 is not supported
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-      options.mimeType = 'video/webm;codecs=vp8';
-    }
-
+    const options = getRecorderOptions(qualitySettings);
     mediaRecorder = new MediaRecorder(stream, options);
 
     mediaRecorder.ondataavailable = (event) => {
@@ -493,8 +563,10 @@ async function stopRecording() {
 
     mediaRecorder.onstop = () => {
       console.log('MediaRecorder stopped, creating blob from', recordedChunks.length, 'chunks');
-      const blob = new Blob(recordedChunks, { type: 'video/webm' });
-      console.log('Blob size:', blob.size, 'bytes');
+      // Determine blob type based on recorder mime type
+      const mimeType = mediaRecorder?.mimeType || 'video/webm';
+      const blob = new Blob(recordedChunks, { type: mimeType });
+      console.log('Blob size:', blob.size, 'bytes, type:', mimeType);
 
       // Create blob URL (can be passed through messages)
       const blobUrl = URL.createObjectURL(blob);

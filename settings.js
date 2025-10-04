@@ -11,6 +11,14 @@ const micStatusIcon = document.getElementById('micStatusIcon');
 const micStatusText = document.getElementById('micStatusText');
 const requestMicPermissionBtn = document.getElementById('requestMicPermission');
 
+// New quality settings elements
+const videoFormatSelect = document.getElementById('videoFormat');
+const videoBitrateSelect = document.getElementById('videoBitrate');
+const customBitrateContainer = document.getElementById('customBitrateContainer');
+const customBitrateInput = document.getElementById('customBitrate');
+const audioBitrateSelect = document.getElementById('audioBitrate');
+const resolutionLimitSelect = document.getElementById('resolutionLimit');
+
 // Load settings on page load
 async function loadSettings() {
   const settings = await chrome.storage.sync.get({
@@ -18,7 +26,13 @@ async function loadSettings() {
     frameRate: 30,
     maxDuration: 0,
     defaultSystemAudio: true,
-    defaultMicrophone: false
+    defaultMicrophone: false,
+    // New quality settings defaults
+    videoFormat: 'webm-vp9',
+    videoBitrate: 'high',
+    customVideoBitrate: 8,
+    audioBitrate: 128,
+    resolutionLimit: 'original'
   });
 
   // Set video quality
@@ -37,6 +51,18 @@ async function loadSettings() {
   // Set default audio settings
   defaultSystemAudioCheckbox.checked = settings.defaultSystemAudio;
   defaultMicrophoneCheckbox.checked = settings.defaultMicrophone;
+
+  // Set new quality settings
+  videoFormatSelect.value = settings.videoFormat;
+  videoBitrateSelect.value = settings.videoBitrate;
+  audioBitrateSelect.value = settings.audioBitrate;
+  resolutionLimitSelect.value = settings.resolutionLimit;
+
+  // Handle custom bitrate display
+  if (settings.videoBitrate === 'custom') {
+    customBitrateContainer.style.display = 'block';
+    customBitrateInput.value = settings.customVideoBitrate;
+  }
 }
 
 // Save settings
@@ -48,7 +74,13 @@ async function saveSettings() {
     frameRate: parseInt(selectedFrameRate.value),
     maxDuration: parseInt(maxDurationSelect.value),
     defaultSystemAudio: defaultSystemAudioCheckbox.checked,
-    defaultMicrophone: defaultMicrophoneCheckbox.checked
+    defaultMicrophone: defaultMicrophoneCheckbox.checked,
+    // Save new quality settings
+    videoFormat: videoFormatSelect.value,
+    videoBitrate: videoBitrateSelect.value,
+    customVideoBitrate: parseFloat(customBitrateInput.value) || 8,
+    audioBitrate: parseInt(audioBitrateSelect.value),
+    resolutionLimit: resolutionLimitSelect.value
   };
 
   await chrome.storage.sync.set(settings);
@@ -161,6 +193,15 @@ async function requestMicPermission() {
 // Event listeners
 saveBtn.addEventListener('click', saveSettings);
 requestMicPermissionBtn.addEventListener('click', requestMicPermission);
+
+// Show/hide custom bitrate input based on selection
+videoBitrateSelect.addEventListener('change', (e) => {
+  if (e.target.value === 'custom') {
+    customBitrateContainer.style.display = 'block';
+  } else {
+    customBitrateContainer.style.display = 'none';
+  }
+});
 
 // Initialize
 loadSettings();
