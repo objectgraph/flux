@@ -2,8 +2,71 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let stream = null;
 let recordingWarning = null;
+let cameraStream = null;
+let compositeCanvas = null;
+let compositeContext = null;
+let animationFrameId = null;
 
 console.log('Offscreen document loaded');
+
+// Camera overlay drag and resize functionality
+const cameraOverlay = document.getElementById('cameraOverlay');
+const cameraVideo = document.getElementById('cameraVideo');
+const resizeHandle = document.querySelector('.resize-handle');
+
+let isDragging = false;
+let isResizing = false;
+let dragOffset = { x: 0, y: 0 };
+let resizeStart = { x: 0, y: 0, width: 0, height: 0 };
+
+// Dragging
+cameraOverlay.addEventListener('mousedown', (e) => {
+  if (e.target === resizeHandle) return;
+  isDragging = true;
+  cameraOverlay.classList.add('dragging');
+  dragOffset.x = e.clientX - cameraOverlay.offsetLeft;
+  dragOffset.y = e.clientY - cameraOverlay.offsetTop;
+  e.preventDefault();
+});
+
+// Resizing
+resizeHandle.addEventListener('mousedown', (e) => {
+  isResizing = true;
+  resizeStart.x = e.clientX;
+  resizeStart.y = e.clientY;
+  resizeStart.width = cameraOverlay.offsetWidth;
+  resizeStart.height = cameraOverlay.offsetHeight;
+  e.stopPropagation();
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const x = e.clientX - dragOffset.x;
+    const y = e.clientY - dragOffset.y;
+    cameraOverlay.style.left = `${x}px`;
+    cameraOverlay.style.top = `${y}px`;
+    cameraOverlay.style.right = 'auto';
+    cameraOverlay.style.bottom = 'auto';
+  } else if (isResizing) {
+    const deltaX = e.clientX - resizeStart.x;
+    const deltaY = e.clientY - resizeStart.y;
+    const newWidth = Math.max(100, resizeStart.width + deltaX);
+    const newHeight = Math.max(75, resizeStart.height + deltaY);
+    cameraOverlay.style.width = `${newWidth}px`;
+    cameraOverlay.style.height = `${newHeight}px`;
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (isDragging) {
+    cameraOverlay.classList.remove('dragging');
+    isDragging = false;
+  }
+  if (isResizing) {
+    isResizing = false;
+  }
+});
 
 // Listen for messages from background
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -119,6 +182,38 @@ async function startPickerRecording(audioOptions, videoConstraints) {
       recordingWarning = 'Recording without system audio - not available for this source';
     }
 
+    // If camera is requested, get camera stream and show overlay
+    if (audioOptions.camera) {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        });
+        cameraVideo.srcObject = cameraStream;
+        cameraOverlay.style.display = 'block';
+        console.log('Camera overlay enabled');
+      } catch (cameraError) {
+        console.error('Failed to get camera:', cameraError);
+        let warningMsg = 'Recording without camera: ';
+        if (cameraError.name === 'NotAllowedError') {
+          warningMsg += 'Permission denied';
+        } else if (cameraError.name === 'NotFoundError') {
+          warningMsg += 'No camera found';
+        } else {
+          warningMsg += cameraError.message || 'Unknown error';
+        }
+
+        if (!recordingWarning) {
+          recordingWarning = warningMsg;
+        } else {
+          recordingWarning += ' | ' + warningMsg;
+        }
+        cameraStream = null;
+      }
+    }
+
     // If microphone is requested, mix it with system audio
     if (audioOptions.microphone) {
       let micStream;
@@ -165,6 +260,12 @@ async function startPickerRecording(audioOptions, videoConstraints) {
       }
     }
 
+    // If camera is enabled, composite the streams using canvas
+    let recordingStream = stream;
+    if (cameraStream) {
+      recordingStream = await compositeStreams(stream, cameraStream);
+    }
+
     // Create and start MediaRecorder
     const options = {
       mimeType: 'video/webm;codecs=vp9',
@@ -175,7 +276,7 @@ async function startPickerRecording(audioOptions, videoConstraints) {
       options.mimeType = 'video/webm;codecs=vp8';
     }
 
-    mediaRecorder = new MediaRecorder(stream, options);
+    mediaRecorder = new MediaRecorder(recordingStream, options);
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
@@ -465,6 +566,21 @@ async function stopRecording() {
         stream.getTracks().forEach(track => track.stop());
       }
 
+      // Stop camera
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+
+      // Stop animation
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      // Hide camera overlay
+      cameraOverlay.style.display = 'none';
+
       // Clean up
       mediaRecorder = null;
       stream = null;
@@ -487,7 +603,93 @@ async function cancelRecording() {
     stream.getTracks().forEach(track => track.stop());
   }
 
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  cameraOverlay.style.display = 'none';
   recordedChunks = [];
   mediaRecorder = null;
   stream = null;
+}
+
+// Composite screen and camera streams onto a canvas
+async function compositeStreams(screenStream, cameraStream) {
+  // Create canvas for compositing
+  const videoTrack = screenStream.getVideoTracks()[0];
+  const settings = videoTrack.getSettings();
+
+  compositeCanvas = document.createElement('canvas');
+  compositeCanvas.width = settings.width || 1920;
+  compositeCanvas.height = settings.height || 1080;
+  compositeContext = compositeCanvas.getContext('2d');
+
+  // Create video elements for drawing
+  const screenVideo = document.createElement('video');
+  screenVideo.srcObject = screenStream;
+  screenVideo.play();
+
+  const cameraVideoElement = cameraVideo; // Use existing camera video element
+
+  // Wait for videos to be ready
+  await new Promise(resolve => {
+    screenVideo.onloadedmetadata = resolve;
+  });
+
+  // Draw composite frame
+  function drawFrame() {
+    if (!compositeContext || !screenVideo || !cameraVideoElement) return;
+
+    // Draw screen
+    compositeContext.drawImage(screenVideo, 0, 0, compositeCanvas.width, compositeCanvas.height);
+
+    // Draw camera overlay if visible
+    if (cameraOverlay.style.display !== 'none' && cameraVideoElement.videoWidth > 0) {
+      // Get camera overlay position and size
+      const overlayRect = cameraOverlay.getBoundingClientRect();
+      const scaleX = compositeCanvas.width / window.innerWidth;
+      const scaleY = compositeCanvas.height / window.innerHeight;
+
+      const camX = overlayRect.left * scaleX;
+      const camY = overlayRect.top * scaleY;
+      const camW = overlayRect.width * scaleX;
+      const camH = overlayRect.height * scaleY;
+
+      // Draw rounded rectangle clip path
+      compositeContext.save();
+      compositeContext.beginPath();
+      const radius = 12 * Math.min(scaleX, scaleY);
+      compositeContext.roundRect(camX, camY, camW, camH, radius);
+      compositeContext.clip();
+
+      // Draw camera
+      compositeContext.drawImage(cameraVideoElement, camX, camY, camW, camH);
+
+      // Draw border
+      compositeContext.strokeStyle = '#ffffff';
+      compositeContext.lineWidth = 3 * Math.min(scaleX, scaleY);
+      compositeContext.stroke();
+      compositeContext.restore();
+    }
+
+    animationFrameId = requestAnimationFrame(drawFrame);
+  }
+
+  drawFrame();
+
+  // Get canvas stream
+  const canvasStream = compositeCanvas.captureStream(30); // 30 fps
+
+  // Add audio tracks from original stream
+  screenStream.getAudioTracks().forEach(track => {
+    canvasStream.addTrack(track);
+  });
+
+  return canvasStream;
 }

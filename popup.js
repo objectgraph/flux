@@ -5,6 +5,7 @@ const cancelBtn = document.getElementById('cancelBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const systemAudioCheckbox = document.getElementById('systemAudio');
 const microphoneAudioCheckbox = document.getElementById('microphoneAudio');
+const cameraOverlayCheckbox = document.getElementById('cameraOverlay');
 const mainControls = document.getElementById('mainControls');
 const recordingControls = document.getElementById('recordingControls');
 const recordingInfo = document.getElementById('recordingInfo');
@@ -197,14 +198,16 @@ async function init() {
   const state = await chrome.runtime.sendMessage({ action: 'getState' });
   updateUI(state);
 
-  // Load default audio settings from storage if not recording
+  // Load default settings from storage if not recording
   if (!state.isRecording) {
     const settings = await chrome.storage.sync.get({
       defaultSystemAudio: true,
-      defaultMicrophone: false
+      defaultMicrophone: false,
+      defaultCamera: false
     });
     systemAudioCheckbox.checked = settings.defaultSystemAudio;
     microphoneAudioCheckbox.checked = settings.defaultMicrophone;
+    cameraOverlayCheckbox.checked = settings.defaultCamera;
   }
 
   // Clear any lingering errors and warnings on popup open
@@ -244,7 +247,8 @@ function updateUI(state) {
 startBtn.addEventListener('click', async () => {
   const audioOptions = {
     systemAudio: systemAudioCheckbox.checked,
-    microphone: microphoneAudioCheckbox.checked
+    microphone: microphoneAudioCheckbox.checked,
+    camera: cameraOverlayCheckbox.checked
   };
 
   // Hide any existing errors
