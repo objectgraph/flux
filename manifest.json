@@ -13,6 +13,12 @@
     "offscreen",
     "notifications"
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["offscreen.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "host_permissions": [
     "<all_urls>"
   ],

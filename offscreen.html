@@ -3,8 +3,59 @@
 <head>
   <meta charset="UTF-8">
   <title>Flux Offscreen</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #cameraOverlay {
+      position: fixed;
+      width: 200px;
+      height: 150px;
+      bottom: 20px;
+      right: 20px;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: move;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      border: 3px solid #fff;
+      display: none;
+      user-select: none;
+    }
+
+    #cameraOverlay video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    #cameraOverlay.dragging {
+      opacity: 0.8;
+    }
+
+    .resize-handle {
+      position: absolute;
+      width: 15px;
+      height: 15px;
+      background: #fff;
+      border-radius: 50%;
+      bottom: 5px;
+      right: 5px;
+      cursor: nwse-resize;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+  </style>
 </head>
 <body>
+  <div id="cameraOverlay">
+    <video id="cameraVideo" autoplay muted playsinline></video>
+    <div class="resize-handle"></div>
+  </div>
+
   <script src="offscreen.js"></script>
 </body>
 </html>

@@ -83,6 +83,14 @@ async function startRecordingWithPicker(audioOptions) {
   try {
     console.log('Starting recording with options:', audioOptions);
 
+    // Request microphone/camera permissions if needed
+    if (audioOptions.microphone || audioOptions.camera) {
+      const permissionGranted = await requestMediaPermissions(audioOptions.microphone, audioOptions.camera);
+      if (!permissionGranted) {
+        throw new Error('Microphone/camera permission denied');
+      }
+    }
+
     // Always use picker mode - let user choose what to record
     await setupOffscreenDocument();
     console.log('Offscreen document ready');
@@ -183,6 +191,12 @@ async function stopRecording() {
     // Stop pulsing icon animation
     stopPulsingIcon();
 
+    // Close the media permission window if it exists
+    if (mediaPermissionWindowId) {
+      chrome.windows.remove(mediaPermissionWindowId).catch(() => {});
+      mediaPermissionWindowId = null;
+    }
+
     notifyStateChange();
 
   } catch (error) {
@@ -210,6 +224,12 @@ async function cancelRecording() {
     // Stop pulsing icon animation
     stopPulsingIcon();
 
+    // Close the media permission window if it exists
+    if (mediaPermissionWindowId) {
+      chrome.windows.remove(mediaPermissionWindowId).catch(() => {});
+      mediaPermissionWindowId = null;
+    }
+
     notifyStateChange();
 
   } catch (error) {
@@ -232,6 +252,64 @@ async function downloadRecording(blobUrl) {
 
 // Removed getVideoConstraints - now using fixed high quality settings
 
+// Store reference to media permission window
+let mediaPermissionWindowId = null;
+
+// Request microphone/camera permissions via a popup window
+async function requestMediaPermissions(needMic, needCamera) {
+  return new Promise((resolve) => {
+    // Build URL with parameters
+    const params = new URLSearchParams();
+    if (needMic) params.set('mic', 'true');
+    if (needCamera) params.set('camera', 'true');
+
+    const url = chrome.runtime.getURL(`permission-helper.html?${params.toString()}`);
+
+    // Open a small window to request permissions
+    chrome.windows.create({
+      url: url,
+      type: 'popup',
+      width: 400,
+      height: 300,
+      focused: true,
+      state: 'normal'
+    }, (window) => {
+      mediaPermissionWindowId = window.id;
+
+      // Listen for response from permission helper
+      const messageListener = (message) => {
+        if (message.action === 'permissionsGranted') {
+          chrome.runtime.onMessage.removeListener(messageListener);
+          console.log('Permissions granted - minimizing window');
+
+          // Minimize the window but keep it alive to maintain media access
+          chrome.windows.update(mediaPermissionWindowId, { state: 'minimized' });
+
+          resolve(true);
+        } else if (message.action === 'permissionsDenied') {
+          chrome.runtime.onMessage.removeListener(messageListener);
+          console.log('Permissions denied');
+          chrome.windows.remove(mediaPermissionWindowId);
+          mediaPermissionWindowId = null;
+          resolve(false);
+        }
+      };
+
+      chrome.runtime.onMessage.addListener(messageListener);
+
+      // If window is closed without granting permission
+      chrome.windows.onRemoved.addListener(function windowClosedListener(closedWindowId) {
+        if (closedWindowId === mediaPermissionWindowId) {
+          chrome.windows.onRemoved.removeListener(windowClosedListener);
+          chrome.runtime.onMessage.removeListener(messageListener);
+          mediaPermissionWindowId = null;
+          resolve(false);
+        }
+      });
+    });
+  });
+}
+
 // Setup offscreen document for recording
 async function setupOffscreenDocument() {
   const existingContexts = await chrome.runtime.getContexts({
@@ -244,8 +322,8 @@ async function setupOffscreenDocument() {
 
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
-    reasons: ['USER_MEDIA'],
-    justification: 'Recording screen and audio'
+    reasons: ['USER_MEDIA', 'DISPLAY_MEDIA'],
+    justification: 'Recording screen with microphone and camera support'
   });
 
   // Wait a bit for the offscreen document to fully load
