@@ -242,6 +242,9 @@ function updateUI(state) {
       const seconds = Math.floor((elapsed % 60000) / 1000);
       timer.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
       startTimer();
+    } else {
+      // Only set to 00:00 if we don't have a start time
+      timer.textContent = '00:00';
     }
   } else {
     mainControls.style.display = 'flex';
@@ -250,6 +253,8 @@ function updateUI(state) {
     countdown.style.display = 'none';
     statusIndicator.classList.remove('recording');
     stopTimer();
+    // Reset timer display only when recording is actually stopped
+    timer.textContent = '00:00';
   }
 }
 
@@ -362,7 +367,7 @@ function stopTimer() {
     clearInterval(timerInterval);
     timerInterval = null;
   }
-  timer.textContent = '00:00';
+  // Don't reset timer display here - only reset when actually stopping recording
 }
 
 // Listen for state changes from background
