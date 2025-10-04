@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flux Settings</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-bottom: 10px;
+      color: #1a1a1a;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 40px;
+    }
+
+    .section {
+      margin-bottom: 40px;
+    }
+
+    .section h2 {
+      font-size: 20px;
+      margin-bottom: 20px;
+      color: #1a1a1a;
+    }
+
+    .setting-group {
+      background: #f9f9f9;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .setting-label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    .setting-description {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 15px;
+    }
+
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      background: white;
+      cursor: pointer;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #4CAF50;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .radio-label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .radio-label input[type="radio"] {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .save-btn {
+      background: #4CAF50;
+      color: white;
+      padding: 12px 30px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .save-btn:hover {
+      background: #45a049;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .save-btn:active {
+      transform: translateY(0);
+    }
+
+    .status-message {
+      display: none;
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .status-message.success {
+      display: block;
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Flux Settings</h1>
+    <p class="subtitle">Customize your recording preferences</p>
+
+    <div class="section">
+      <h2>Video Quality</h2>
+      <div class="setting-group">
+        <label class="setting-label">Resolution</label>
+        <p class="setting-description">Higher resolution provides better quality but larger file sizes</p>
+        <select id="videoQuality">
+          <option value="720p">720p (HD)</option>
+          <option value="1080p">1080p (Full HD)</option>
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-label">Frame Rate</label>
+        <p class="setting-description">Higher frame rate provides smoother video</p>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="frameRate" value="30">
+            <span>30 FPS</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="frameRate" value="60">
+            <span>60 FPS</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Audio Defaults</h2>
+      <div class="setting-group">
+        <label class="setting-label">Default Audio Settings</label>
+        <p class="setting-description">These settings will be pre-selected when you start recording</p>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="checkbox" id="defaultSystemAudio">
+            <span>System Audio</span>
+          </label>
+          <label class="radio-label">
+            <input type="checkbox" id="defaultMicrophone">
+            <span>Microphone</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <button class="save-btn" id="saveBtn">Save Settings</button>
+    <div class="status-message" id="statusMessage">Settings saved successfully!</div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

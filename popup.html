@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flux Recorder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Flux</h1>
+      <div class="status-indicator" id="statusIndicator"></div>
+    </div>
+
+    <div class="recording-info" id="recordingInfo" style="display: none;">
+      <div class="timer" id="timer">00:00</div>
+      <div class="recording-label">Recording...</div>
+    </div>
+
+    <div class="countdown" id="countdown" style="display: none;">
+      <div class="countdown-number" id="countdownNumber">3</div>
+    </div>
+
+    <div class="controls" id="mainControls">
+      <div class="audio-settings">
+        <label class="checkbox-label">
+          <input type="checkbox" id="systemAudio" checked>
+          <span>System Audio</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="microphoneAudio">
+          <span>Microphone</span>
+        </label>
+      </div>
+
+      <button class="btn btn-primary" id="startBtn">
+        <span class="btn-icon">●</span>
+        Start Recording
+      </button>
+
+      <button class="btn btn-secondary" id="settingsBtn">
+        Settings
+      </button>
+    </div>
+
+    <div class="recording-controls" id="recordingControls" style="display: none;">
+      <button class="btn btn-danger" id="stopBtn">
+        <span class="btn-icon">■</span>
+        Stop Recording
+      </button>
+      <button class="btn btn-secondary" id="cancelBtn">
+        Cancel
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
