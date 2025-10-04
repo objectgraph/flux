@@ -95,8 +95,11 @@ function getRecorderOptions(qualitySettings) {
 
   // Set MIME type based on format selection
   if (format === 'mp4') {
-    // Try MP4 with H264
-    if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+    // Try MP4 with H264 baseline profile for maximum compatibility
+    if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2')) {
+      // Baseline profile - works with QuickTime and most players
+      options.mimeType = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+    } else if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
       options.mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
     } else if (MediaRecorder.isTypeSupported('video/mp4')) {
       options.mimeType = 'video/mp4';
