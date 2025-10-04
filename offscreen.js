@@ -1,6 +1,7 @@
 let mediaRecorder = null;
 let recordedChunks = [];
 let stream = null;
+let microphoneStream = null; // Store microphone stream separately for cleanup
 let recordingWarning = null;
 
 console.log('Offscreen document loaded');
@@ -80,6 +81,10 @@ async function startPickerRecording(audioOptions, videoConstraints) {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
     }
+    if (microphoneStream) {
+      microphoneStream.getTracks().forEach(track => track.stop());
+      microphoneStream = null;
+    }
     recordedChunks = [];
     recordingWarning = null;
 
@@ -121,16 +126,27 @@ async function startPickerRecording(audioOptions, videoConstraints) {
 
     // If microphone is requested, mix it with system audio
     if (audioOptions.microphone) {
-      let micStream;
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Check if we have permission first (won't prompt, just checks)
+        const micPermission = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+
+        if (micPermission && micPermission.state === 'denied') {
+          throw new Error('Microphone permission denied. Please grant permission in Settings.');
+        }
+
+        console.log('Attempting to get microphone stream for picker recording...');
+        microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('Successfully got microphone stream');
       } catch (micError) {
         console.error('Failed to get microphone:', micError);
         let warningMsg = 'Recording without microphone: ';
-        if (micError.name === 'NotAllowedError') {
-          warningMsg += 'Permission denied';
+
+        if (micError.name === 'NotAllowedError' || micError.message?.includes('permission denied')) {
+          warningMsg += 'Permission denied. Please grant permission in Settings.';
         } else if (micError.name === 'NotFoundError') {
           warningMsg += 'No microphone found';
+        } else if (micError.message?.includes('Permission denied')) {
+          warningMsg += 'Permission denied. Please grant permission in Settings.';
         } else {
           warningMsg += micError.message || 'Unknown error';
         }
@@ -140,11 +156,11 @@ async function startPickerRecording(audioOptions, videoConstraints) {
         } else {
           recordingWarning += ' | ' + warningMsg;
         }
-        micStream = null;
+        microphoneStream = null;
       }
 
       // Mix audio if we have microphone
-      if (micStream) {
+      if (microphoneStream) {
         const audioContext = new AudioContext();
         const destination = audioContext.createMediaStreamDestination();
 
@@ -156,7 +172,7 @@ async function startPickerRecording(audioOptions, videoConstraints) {
         }
 
         // Add microphone
-        const micSource = audioContext.createMediaStreamSource(micStream);
+        const micSource = audioContext.createMediaStreamSource(microphoneStream);
         micSource.connect(destination);
 
         // Create new stream with video + mixed audio
@@ -200,6 +216,10 @@ async function startPickerRecording(audioOptions, videoConstraints) {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
       stream = null;
+    }
+    if (microphoneStream) {
+      microphoneStream.getTracks().forEach(track => track.stop());
+      microphoneStream = null;
     }
     if (mediaRecorder) {
       mediaRecorder = null;
@@ -333,6 +353,10 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
     }
+    if (microphoneStream) {
+      microphoneStream.getTracks().forEach(track => track.stop());
+      microphoneStream = null;
+    }
     recordedChunks = [];
     recordingWarning = audioFailedWarning;
 
@@ -341,18 +365,30 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
 
     // If microphone is requested, mix it with system audio
     if (audioOptions.microphone) {
-      let micStream;
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({
+        // Check if we have permission first (won't prompt, just checks)
+        const micPermission = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+
+        if (micPermission && micPermission.state === 'denied') {
+          throw new Error('Microphone permission denied. Please grant permission in Settings.');
+        }
+
+        // Try to get microphone stream
+        console.log('Attempting to get microphone stream...');
+        microphoneStream = await navigator.mediaDevices.getUserMedia({
           audio: true
         });
+        console.log('Successfully got microphone stream');
       } catch (micError) {
         console.error('Failed to get microphone access:', micError);
         let warningMsg = 'Recording without microphone: ';
-        if (micError.name === 'NotAllowedError') {
-          warningMsg += 'Permission denied';
+
+        if (micError.name === 'NotAllowedError' || micError.message?.includes('permission denied')) {
+          warningMsg += 'Permission denied. Please grant permission in Settings.';
         } else if (micError.name === 'NotFoundError') {
           warningMsg += 'No microphone found';
+        } else if (micError.message?.includes('Permission denied')) {
+          warningMsg += 'Permission denied. Please grant permission in Settings.';
         } else {
           warningMsg += micError.name || micError.message || 'Unknown error';
         }
@@ -362,11 +398,11 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
         } else {
           recordingWarning += ' | ' + warningMsg;
         }
-        micStream = null;
+        microphoneStream = null;
       }
 
       // Only mix audio if we have a microphone stream
-      if (micStream) {
+      if (microphoneStream) {
         const audioContext = new AudioContext();
         const destination = audioContext.createMediaStreamDestination();
 
@@ -377,7 +413,7 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
         }
 
         // Add microphone audio
-        const micSource = audioContext.createMediaStreamSource(micStream);
+        const micSource = audioContext.createMediaStreamSource(microphoneStream);
         micSource.connect(destination);
 
         // Replace audio track with mixed audio
@@ -432,6 +468,10 @@ async function initRecording(streamId, audioOptions, videoConstraints, isDesktop
       stream.getTracks().forEach(track => track.stop());
       stream = null;
     }
+    if (microphoneStream) {
+      microphoneStream.getTracks().forEach(track => track.stop());
+      microphoneStream = null;
+    }
     if (mediaRecorder) {
       mediaRecorder = null;
     }
@@ -465,6 +505,16 @@ async function stopRecording() {
         stream.getTracks().forEach(track => track.stop());
       }
 
+      // Stop microphone stream separately
+      if (microphoneStream) {
+        console.log('Stopping microphone stream tracks');
+        microphoneStream.getTracks().forEach(track => {
+          track.stop();
+          console.log('Stopped microphone track:', track.label);
+        });
+        microphoneStream = null;
+      }
+
       // Clean up
       mediaRecorder = null;
       stream = null;
@@ -485,6 +535,16 @@ async function cancelRecording() {
 
   if (stream) {
     stream.getTracks().forEach(track => track.stop());
+  }
+
+  // Stop microphone stream separately
+  if (microphoneStream) {
+    console.log('Cancelling: Stopping microphone stream tracks');
+    microphoneStream.getTracks().forEach(track => {
+      track.stop();
+      console.log('Cancelled: Stopped microphone track:', track.label);
+    });
+    microphoneStream = null;
   }
 
   recordedChunks = [];

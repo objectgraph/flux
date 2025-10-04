@@ -205,6 +205,19 @@ async function init() {
     });
     systemAudioCheckbox.checked = settings.defaultSystemAudio;
     microphoneAudioCheckbox.checked = settings.defaultMicrophone;
+
+    // Check microphone permission status and update UI
+    const micPermission = await checkMicrophonePermission();
+    const micLabel = microphoneAudioCheckbox.parentElement;
+
+    if (micPermission === 'denied') {
+      micLabel.style.opacity = '0.6';
+      micLabel.title = 'Microphone permission denied. Click Settings to grant permission.';
+    } else if (micPermission === 'prompt') {
+      micLabel.title = 'Microphone permission will be requested when needed.';
+    } else if (micPermission === 'granted') {
+      micLabel.title = 'Microphone permission granted.';
+    }
   }
 
   // Clear any lingering errors and warnings on popup open
@@ -240,6 +253,17 @@ function updateUI(state) {
   }
 }
 
+// Check microphone permission status
+async function checkMicrophonePermission() {
+  try {
+    const permission = await navigator.permissions.query({ name: 'microphone' });
+    return permission.state;
+  } catch (error) {
+    console.log('Could not check microphone permission:', error);
+    return 'unknown';
+  }
+}
+
 // Start recording with countdown
 startBtn.addEventListener('click', async () => {
   const audioOptions = {
@@ -249,6 +273,21 @@ startBtn.addEventListener('click', async () => {
 
   // Hide any existing errors
   hideError();
+
+  // Check microphone permission if microphone is requested
+  if (audioOptions.microphone) {
+    const micPermission = await checkMicrophonePermission();
+
+    if (micPermission === 'denied') {
+      showError('Microphone permission is denied. Please go to Settings to grant permission first.');
+      // Open settings page directly
+      chrome.runtime.openOptionsPage();
+      return;
+    } else if (micPermission === 'prompt') {
+      // Show info message
+      showWarning('You may need to grant microphone permission. If prompted, please click Allow.');
+    }
+  }
 
   try {
     // Call startRecording - it will handle picker vs current tab
